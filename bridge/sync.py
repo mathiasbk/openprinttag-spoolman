@@ -234,6 +234,24 @@ def implausible_use(loaded: "LoadedSpool", delta: float) -> bool:
     return full is not None and delta > full + USED_WEIGHT_TOLERANCE
 
 
+def go_live_step(loaded: "LoadedSpool", previous: float | None) -> dict:
+    """What the first live poll would do with a linked spool: grams to deduct, and why."""
+    current = loaded.consumed_weight
+    if current is None:
+        return {"previous": previous, "current": None, "deduct": 0.0, "note": "Connect reports no consumption for this spool yet."}
+    current = float(current)
+    action, delta = consumption_step(previous, current)
+    note = None
+    if action == "baseline":
+        note = f"Not seen before, so counting starts at {round(current)} g."
+    elif action == "rebase":
+        note = "Connect reports less than last time, so counting starts again from here."
+    elif action == "use" and implausible_use(loaded, delta):
+        action, delta = "rebase", 0.0
+        note = "More than a whole spool since last time, so this is not deducted."
+    return {"previous": previous, "current": current, "deduct": delta if action == "use" else 0.0, "note": note}
+
+
 def _color_distance(a: str | None, b: str | None) -> float | None:
     if not a or not b or len(a) != 6 or len(b) != 6:
         return None
