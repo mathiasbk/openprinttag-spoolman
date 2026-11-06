@@ -5,8 +5,8 @@
 <div class="card panel">
 {% if spool_url %}<p>Open <a href="{{ spool_url }}">the spool in Spoolman</a>.</p>{% endif %}
 {% if calls %}
-<p class="lead">{{ 'Dry run: would perform these writes.' if settings.dry_run else 'Writes performed:' }}</p>
-<ul class="calls">{% for call in calls %}<li><code>{{ call }}</code></li>{% endfor %}</ul>
+<p class="lead">{{ 'Dry run, so nothing was written.' if settings.dry_run else 'Writes performed:' }}</p>
+<ul class="calls">{% for call in calls %}<li>{{ call|action_summary }}<details class="action-call"><summary>Show details</summary><code>{{ call.text }}</code></details></li>{% endfor %}</ul>
 {% else %}
 <p>No writes were needed.</p>
 {% endif %}

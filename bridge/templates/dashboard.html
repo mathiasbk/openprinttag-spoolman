@@ -77,7 +77,8 @@
   {% if printer.actions %}
   <details class="actions">
     <summary>Recent actions ({{ printer.actions|length }})</summary>
-    <ul>{% for action in printer.actions|reverse %}<li>{{ action.time|clock }} {{ 'Would call' if action.dry_run else 'Called' }} <code>{{ action.text }}</code></li>{% endfor %}</ul>
+    <ul class="action-list">{% for action in printer.actions|reverse %}<li><span class="action-time">{{ (action.time|clock)[:5] }}</span> {{ action|action_summary }}
+      <details class="action-call"><summary>Show details</summary><code>{{ action.text }}</code></details></li>{% endfor %}</ul>
   </details>
   {% endif %}
 </section>
