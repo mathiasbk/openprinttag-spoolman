@@ -1,4 +1,5 @@
 import base64
+import copy
 import json
 import os
 import stat
@@ -461,6 +462,66 @@ def test_auto_create_skips_a_tag_without_density_and_keeps_polling(respx_mock, t
     assert result["tools"][0]["spool_id"] is None
     assert writes(respx_mock) == []
     assert any("density" in w for w in result["warnings"])
+
+
+@respx.mock(assert_all_called=False)
+def test_auto_create_skip_leaves_the_other_tools_synced(respx_mock, tmp_path):
+    """The tag without density only skips its own tool; a linked spool in the next tool is still synced."""
+    mock_fields(respx_mock)
+    respx_mock.get(f"{SPOOLMAN}/api/v1/spool").respond(json=[existing_spool(extra=linked_extra(30))])
+    data = printer(consumed=30)
+    linked_tool = copy.deepcopy(data["fff"]["tools"][0])
+    linked_tool["id"] = "1"
+    bare = data["fff"]["tools"][0]["materialPackageInstance"]
+    bare["uuid"] = "no-density"
+    bare["package"]["material"]["properties"] = {"density": None}
+    data["fff"]["tools"].append(linked_tool)
+    result = make_bridge(tmp_path, data, auto_create=True).poll()
+    assert [tool["spool_id"] for tool in result["tools"]] == [None, 42]
+    assert writes(respx_mock) == []
+
+
+@respx.mock(assert_all_called=False)
+def test_auto_create_uses_density_from_the_warehouse(respx_mock, tmp_path):
+    """Adding the density in Connect is enough: the warehouse fills it in and the spool is created."""
+    mock_fields(respx_mock)
+    respx_mock.get(f"{SPOOLMAN}/api/v1/spool").respond(json=[])
+    respx_mock.get(f"{SPOOLMAN}/api/v1/vendor").respond(json=[])
+    respx_mock.get(f"{SPOOLMAN}/api/v1/filament").respond(json=[])
+    respx_mock.post(f"{SPOOLMAN}/api/v1/vendor").respond(json={"id": 7})
+    filament = respx_mock.post(f"{SPOOLMAN}/api/v1/filament").respond(json={"id": 8})
+    spool = respx_mock.post(f"{SPOOLMAN}/api/v1/spool").respond(json={"id": 9})
+    data = printer(consumed=30)
+    data["fff"]["tools"][0]["materialPackageInstance"]["package"]["material"]["properties"] = {"density": None}
+    item = {"materialPackageInstance": {"uuid": UUID, "package": {"material": {"properties": {"density": 1.2}}}}}
+    poller = make_bridge(tmp_path, data, auto_create=True)
+    poller.bridge.connect.warehouse = [item]
+    result = poller.poll()
+    assert not any("density" in w for w in result["warnings"])
+    assert json.loads(filament.calls[0].request.content)["density"] == 1.2
+    assert spool.called
+    assert result["tools"][0]["spool_id"] == 9
+
+
+@respx.mock(assert_all_called=False)
+def test_auto_create_uses_filament_diameter_from_the_warehouse(respx_mock, tmp_path):
+    """A tag that only lacks the filament diameter also gets it from the warehouse, as the warning promises."""
+    mock_fields(respx_mock)
+    respx_mock.get(f"{SPOOLMAN}/api/v1/spool").respond(json=[])
+    respx_mock.get(f"{SPOOLMAN}/api/v1/vendor").respond(json=[])
+    respx_mock.get(f"{SPOOLMAN}/api/v1/filament").respond(json=[])
+    respx_mock.post(f"{SPOOLMAN}/api/v1/vendor").respond(json={"id": 7})
+    filament = respx_mock.post(f"{SPOOLMAN}/api/v1/filament").respond(json={"id": 8})
+    respx_mock.post(f"{SPOOLMAN}/api/v1/spool").respond(json={"id": 9})
+    data = printer(consumed=30)
+    data["fff"]["tools"][0]["materialPackageInstance"]["package"]["filamentDiameter"] = None
+    item = {"materialPackageInstance": {"uuid": UUID, "package": {"filamentDiameter": 1.75}}}
+    poller = make_bridge(tmp_path, data, auto_create=True)
+    poller.bridge.connect.warehouse = [item]
+    result = poller.poll()
+    assert not any("diameter" in w for w in result["warnings"])
+    assert json.loads(filament.calls[0].request.content)["diameter"] == 1.75
+    assert result["tools"][0]["spool_id"] == 9
 
 
 def custom_tag_printer(consumed=0):
