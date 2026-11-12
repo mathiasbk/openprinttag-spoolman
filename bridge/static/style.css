@@ -321,6 +321,13 @@ code { font-family: var(--code); font-size: 0.87rem; overflow-wrap: anywhere; }
 .compare + form { margin-top: 1.5rem; }
 .change-note { display: block; margin-top: 0.25rem; font-weight: 400; }
 .calls { margin: 0 0 1rem; padding-left: 1.25rem; }
+.calls li { margin-bottom: 0.5rem; }
+.actions .action-list { padding-left: 0; list-style: none; }
+.action-list li { margin-bottom: 0.4rem; color: var(--ink); }
+.action-time { color: var(--mute); font-variant-numeric: tabular-nums; margin-right: 0.35rem; }
+.action-list .action-call { margin-left: 2.9rem; }
+.action-call summary { color: var(--mute); font-size: 0.85rem; cursor: pointer; }
+.action-call code { display: block; margin-top: 0.25rem; overflow-wrap: anywhere; font-size: 0.82rem; }
 
 /* Forms */
 .stack { display: grid; gap: 1rem; max-width: 40rem; }

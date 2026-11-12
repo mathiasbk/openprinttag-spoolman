@@ -172,6 +172,12 @@ def create_app(service: Service) -> Flask:
     def kilograms(value):
         return f"{round(value):d} g" if value < 1000 else f"{value / 1000:.1f} kg"
 
+    @app.template_filter("action_summary")
+    def action_summary(action):
+        """'Deducted 6 g from spool #55', or 'Would have deducted …' in a dry run."""
+        text = action["summary"]
+        return f"Would have {text[:1].lower()}{text[1:]}" if action["dry_run"] else text
+
     @app.template_filter("until")
     def until(timestamp):
         if not timestamp:

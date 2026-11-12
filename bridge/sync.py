@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .config import PrinterConfig
 from .connect import ConnectError
-from .spoolman import SpoolmanClient, SpoolmanError, encode_extra, extra_value
+from .spoolman import SpoolmanClient, SpoolmanError, encode_extra, extra_value, spool_label
 
 log = logging.getLogger(__name__)
 
@@ -231,6 +231,13 @@ def stored_consumed(spool: dict) -> float | None:
     except (TypeError, ValueError):
         log.warning("Spool %s has an unreadable %s value %r; ignoring it", spool.get("id"), CONSUMED_FIELD, value)
         return None
+
+
+def grams_text(value: float) -> str:
+    """12 g, 1.4 g, or "less than 0.1 g", so a small deduction never reads as 0 g."""
+    if value < 0.05:
+        return "less than 0.1 g"
+    return f"{round(value)} g" if value >= 10 else f"{round(value, 1):g} g"
 
 
 def encode_consumed(consumed: float) -> str:
@@ -573,7 +580,7 @@ class Bridge:
         if not location or spool.get("location") == location:
             return
         if loaded.uuid not in placed:
-            self.spoolman.update_spool(spool["id"], {"location": location})
+            self.spoolman.update_spool(spool["id"], {"location": location}, f"Moved spool {spool_label(spool)} to {location}")
             placed.add(loaded.uuid)
         elif loaded.uuid not in self._warned_moved:
             self._warned_moved.add(loaded.uuid)
@@ -616,7 +623,12 @@ class Bridge:
         if action == "use":
             self._deduct(spool_id, delta, current)
         else:
-            self.spoolman.update_spool(spool_id, {"extra": {**(spool.get("extra") or {}), CONSUMED_FIELD: encode_consumed(current)}})
+            again = "again " if action == "rebase" else ""
+            self.spoolman.update_spool(
+                spool_id,
+                {"extra": {**(spool.get("extra") or {}), CONSUMED_FIELD: encode_consumed(current)}},
+                f"Started counting consumption {again}on spool {spool_label(spool)} at {round(current)} g",
+            )
         self.state.record(loaded.uuid, current, "use" if action == "use" else action)
 
     def _deduct(self, spool_id: int, delta: float, consumed: float) -> None:
@@ -637,7 +649,7 @@ class Bridge:
         }
         if not fresh.get("first_used"):
             body["first_used"] = now
-        self.spoolman.update_spool(spool_id, body)
+        self.spoolman.update_spool(spool_id, body, f"Deducted {grams_text(delta)} from spool {spool_label(fresh)}")
 
     def link_spool(self, loaded: LoadedSpool, spool_id: int, selected: set[str], loaded_now: set[str] | None = None) -> None:
         """Apply the review page's choices. Other extra fields, like card_uids, are kept."""
@@ -667,8 +679,9 @@ class Bridge:
             else:
                 filament_body[change["field"]] = change["after"]
         if filament_body:
-            self.spoolman.update_filament(filament["id"], dict(sorted(filament_body.items())))
-        self.spoolman.update_spool(spool_id, dict(sorted(spool_body.items())))
+            fields = ", ".join(changes[key]["label"].removeprefix("Filament: ") for key in sorted(selected) if changes.get(key) and changes[key]["target"] == "filament")
+            self.spoolman.update_filament(filament["id"], dict(sorted(filament_body.items())), f"Updated filament #{filament['id']} ({fields})")
+        self.spoolman.update_spool(spool_id, dict(sorted(spool_body.items())), f"Linked spool {spool_label(spool)} to {loaded.display_name}")
         # The spool now accounts for everything up to this point, or starts counting from it.
         if loaded.consumed_weight is not None and not self.spoolman.dry_run:
             self.state.record(loaded.uuid, float(loaded.consumed_weight), "baseline")
@@ -678,12 +691,12 @@ class Bridge:
         kept = {k: v for k, v in (spool.get("extra") or {}).items() if k not in (SPOOL_UUID_FIELD, CONSUMED_FIELD)}
         try:
             # Spoolman 0.27 merges extra fields per key, so a field is only removed when it is sent as null.
-            self.spoolman.update_spool(spool_id, {"extra": {**kept, SPOOL_UUID_FIELD: None, CONSUMED_FIELD: None}})
+            self.spoolman.update_spool(spool_id, {"extra": {**kept, SPOOL_UUID_FIELD: None, CONSUMED_FIELD: None}}, f"Unlinked spool {spool_label(spool)}")
         except SpoolmanError as e:
             if "HTTP 422" not in str(e):
                 raise
             # Older Spoolman replaces the whole extra dict and does not accept null values.
-            self.spoolman.update_spool(spool_id, {"extra": kept})
+            self.spoolman.update_spool(spool_id, {"extra": kept}, f"Unlinked spool {spool_label(spool)}")
         if not self.spoolman.dry_run and extra_value(self.spoolman.get_spool(spool_id), SPOOL_UUID_FIELD):
             raise SpoolmanError(f"Spoolman kept the link on spool {spool_id}")
 
@@ -725,7 +738,8 @@ class Bridge:
                 "used_weight": consumed,
                 "location": location or None,
                 "extra": {SPOOL_UUID_FIELD: encode_extra(loaded.uuid), CONSUMED_FIELD: encode_consumed(consumed)},
-            }
+            },
+            f"Created a spool for {loaded.display_name}" + (f" at {location}" if location else ""),
         )
         if created is not None:
             log.info("Created Spoolman spool %s for instance %s", created["id"], loaded.uuid)
@@ -737,7 +751,7 @@ class Bridge:
         vendor_id = self._existing_vendor_id(loaded)
         if vendor_id is not None:
             return vendor_id
-        created = self.spoolman.create_vendor({"name": loaded.brand})
+        created = self.spoolman.create_vendor({"name": loaded.brand}, f"Created vendor {loaded.brand}")
         return created["id"] if created else "<id of new vendor>"
 
     def _find_or_create_filament(self, loaded: LoadedSpool) -> int | str:
@@ -758,5 +772,5 @@ class Bridge:
         }
         if loaded.material_uuid:
             body["extra"] = {FILAMENT_UUID_FIELD: encode_extra(loaded.material_uuid)}
-        created = self.spoolman.create_filament(body)
+        created = self.spoolman.create_filament(body, f"Created filament {loaded.brand} {loaded.material_name}")
         return created["id"] if created else "<id of new filament>"
