@@ -51,7 +51,7 @@ class LoadedSpool:
 
     @property
     def can_create(self) -> bool:
-        return all(v is not None for v in (self.brand, self.material_name, self.density, self.filament_diameter))
+        return not missing_for_create(self)
 
     @property
     def full_weight(self) -> float | None:
@@ -523,7 +523,8 @@ class Bridge:
                 if existing is None and missing:
                     message = (
                         f"Cannot create a spool for {loaded.display_name} automatically: the tag does not say its {', '.join(missing)}. "
-                        "Link it to an existing spool, or add what is missing and create it from the dashboard."
+                        "Link it to an existing Spoolman spool from the dashboard, or add the missing details to this spool in Prusa Connect "
+                        "and the bridge creates it on the next poll."
                     )
                     if warnings is not None:
                         warnings.append(message)
