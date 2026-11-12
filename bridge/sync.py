@@ -73,7 +73,7 @@ class LoadedSpool:
 
     @property
     def is_missing_details(self) -> bool:
-        return any(v is None for v in (self.brand, self.material_name, self.density, self.empty_weight))
+        return any(v is None for v in (self.brand, self.material_name, self.density, self.filament_diameter, self.empty_weight))
 
 
 def color_hex(rgba: str | None) -> str | None:

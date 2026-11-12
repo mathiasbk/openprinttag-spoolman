@@ -503,6 +503,27 @@ def test_auto_create_uses_density_from_the_warehouse(respx_mock, tmp_path):
     assert result["tools"][0]["spool_id"] == 9
 
 
+@respx.mock(assert_all_called=False)
+def test_auto_create_uses_filament_diameter_from_the_warehouse(respx_mock, tmp_path):
+    """A tag that only lacks the filament diameter also gets it from the warehouse, as the warning promises."""
+    mock_fields(respx_mock)
+    respx_mock.get(f"{SPOOLMAN}/api/v1/spool").respond(json=[])
+    respx_mock.get(f"{SPOOLMAN}/api/v1/vendor").respond(json=[])
+    respx_mock.get(f"{SPOOLMAN}/api/v1/filament").respond(json=[])
+    respx_mock.post(f"{SPOOLMAN}/api/v1/vendor").respond(json={"id": 7})
+    filament = respx_mock.post(f"{SPOOLMAN}/api/v1/filament").respond(json={"id": 8})
+    respx_mock.post(f"{SPOOLMAN}/api/v1/spool").respond(json={"id": 9})
+    data = printer(consumed=30)
+    data["fff"]["tools"][0]["materialPackageInstance"]["package"]["filamentDiameter"] = None
+    item = {"materialPackageInstance": {"uuid": UUID, "package": {"filamentDiameter": 1.75}}}
+    poller = make_bridge(tmp_path, data, auto_create=True)
+    poller.bridge.connect.warehouse = [item]
+    result = poller.poll()
+    assert not any("diameter" in w for w in result["warnings"])
+    assert json.loads(filament.calls[0].request.content)["diameter"] == 1.75
+    assert result["tools"][0]["spool_id"] == 9
+
+
 def custom_tag_printer(consumed=0):
     data = printer(consumed=consumed, uuid="custom", from_nfc=False)
     instance = data["fff"]["tools"][0]["materialPackageInstance"]
