@@ -105,6 +105,8 @@
   <p class="hint">In a dry run the bridge reads everything and shows what it would do, but writes nothing to Spoolman. It remembers the consumption from the first poll, so when you turn dry run off, what was used in the meantime is deducted from linked spools too.</p>
   <label class="check"><input type="checkbox" name="auto_create" {{ 'checked' if settings.auto_create }}> Create new spools automatically</label>
   <p class="hint">Off: the dashboard asks whether an unknown spool should be linked to an existing one or created, which avoids duplicates. On: the bridge creates the spool right away.</p>
+  <label class="check"><input type="checkbox" name="track_usage" {{ 'checked' if settings.track_usage }}> Deduct consumption in Spoolman</label>
+  <p class="hint">On: what the printer consumes is deducted from the linked spool. Off: the bridge only links spools and sets their location. Turn it off if something else, such as a print tracker, already deducts filament in Spoolman.</p>
   <label>Seconds between polls
     <input name="poll_interval" type="number" min="10" value="{{ settings.poll_interval }}">
   </label>

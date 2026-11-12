@@ -540,6 +540,7 @@ def create_app(service: Service) -> Flask:
             {
                 "dry_run": request.form.get("dry_run") == "on",
                 "auto_create": request.form.get("auto_create") == "on",
+                "track_usage": request.form.get("track_usage") == "on",
                 "poll_interval": poll_interval,
                 "warehouse_interval": warehouse_interval,
             },

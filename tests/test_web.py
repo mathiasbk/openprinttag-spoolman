@@ -641,6 +641,17 @@ def test_a_warehouse_failure_does_not_stop_the_poll(respx_mock, tmp_path):
     assert "Could not read the Connect warehouse" in page
 
 
+def test_mode_step_saves_track_usage(tmp_path):
+    service = make_service(tmp_path)
+    client = signed_in(service)
+    client.post("/setup/mode", data={"poll_interval": "60"})
+    assert read_config(tmp_path)["track_usage"] is False
+    assert service.settings.track_usage is False
+    client.post("/setup/mode", data={"poll_interval": "60", "track_usage": "on"})
+    assert read_config(tmp_path)["track_usage"] is True
+    assert service.settings.track_usage is True
+
+
 def test_the_warehouse_interval_can_be_saved(tmp_path):
     service = make_service(tmp_path)
     client = signed_in(service)

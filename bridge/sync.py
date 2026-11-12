@@ -339,7 +339,7 @@ def _differs(before, after) -> bool:
     return before != after
 
 
-def build_link_changes(loaded: LoadedSpool, spool: dict, shared: int) -> list[dict]:
+def build_link_changes(loaded: LoadedSpool, spool: dict, shared: int, track_usage: bool = True) -> list[dict]:
     """The rows on the review page. Filament changes are off if other spools share the filament."""
     filament = spool.get("filament") or {}
     # Without an NFC reading, Connect's material data may be generic, so it should not overwrite anything by default.
@@ -369,6 +369,9 @@ def build_link_changes(loaded: LoadedSpool, spool: dict, shared: int) -> list[di
         if key == "spool_used_weight" and more_used_elsewhere:
             checked = False
             note = f"Spoolman has recorded more usage ({round(used)} g) than the tag ({round(consumed)} g). It was likely used on another printer, so Spoolman's value is kept by default."
+        elif key == "spool_used_weight" and not track_usage:
+            checked = False
+            note = "Deducting consumption is turned off, so something else keeps Spoolman's consumed weight. It is kept by default."
         changes.append(
             {"key": key, "target": target, "field": field, "label": label, "before": before, "after": after, "checked": checked, "locked": key == "spool_instance", "note": note}
         )
@@ -424,11 +427,12 @@ class State:
 
 
 class Bridge:
-    def __init__(self, connect, spoolman: SpoolmanClient, state: State, auto_create: bool = False):
+    def __init__(self, connect, spoolman: SpoolmanClient, state: State, auto_create: bool = False, track_usage: bool = True):
         self.connect = connect
         self.spoolman = spoolman
         self.state = state
         self.auto_create = auto_create
+        self.track_usage = track_usage
         self.fields_ready = False
         self._warned_unlinked: set[str] = set()
         self._placed: dict[str, set[str]] = {}
@@ -526,7 +530,8 @@ class Bridge:
         if spool.get("archived"):
             log.warning("Spool %s is archived in Spoolman but loaded in the printer", spool["id"])
         self._sync_location(loaded, spool, location, placed)
-        self._sync_consumption(loaded, spool)
+        if self.track_usage:
+            self._sync_consumption(loaded, spool)
         return spool["id"]
 
     @staticmethod
@@ -619,7 +624,7 @@ class Bridge:
         taken = extra_value(spool, SPOOL_UUID_FIELD)
         if taken and taken != loaded.uuid and not can_replace_link(loaded, taken, loaded_now or set()):
             raise SpoolmanError(f"Spool {spool_id} is already linked to instance {taken}")
-        changes = {c["key"]: c for c in build_link_changes(loaded, spool, 0)}
+        changes = {c["key"]: c for c in build_link_changes(loaded, spool, 0, self.track_usage)}
         spool_extra = dict(spool.get("extra") or {})
         spool_extra[SPOOL_UUID_FIELD] = encode_extra(loaded.uuid)
         if loaded.consumed_weight is not None:

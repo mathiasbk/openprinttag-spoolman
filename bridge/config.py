@@ -61,6 +61,7 @@ class Settings:
     warehouse_interval: int = 600
     dry_run: bool = True
     auto_create: bool = False
+    track_usage: bool = True
     printers: tuple[PrinterConfig, ...] = ()
     data_dir: Path = Path("/data")
     web_port: int = DEFAULT_WEB_PORT
@@ -161,6 +162,7 @@ def load_settings(env: dict | None = None) -> Settings:
         warehouse_interval=warehouse_interval,
         dry_run=_flag(value("dry_run", "DRY_RUN"), "DRY_RUN", True),
         auto_create=_flag(value("auto_create", "AUTO_CREATE"), "AUTO_CREATE", False),
+        track_usage=_flag(value("track_usage", "TRACK_USAGE"), "TRACK_USAGE", True),
         printers=_config_printers(config["printers"]) if "printers" in config else _env_printers(env),
         data_dir=data_dir,
         web_port=web_port,

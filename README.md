@@ -15,7 +15,7 @@ The bridge reads each loaded spool's OpenPrintTag data from Prusa Connect, links
 
 1. Every minute, the bridge asks Prusa Connect's GraphQL API what each printer has loaded. Connect reports the OpenPrintTag data read from the spool's NFC tag, including its instance UUID.
 2. It looks that UUID up in the `opt_instance_uuid` extra field in Spoolman. You choose what happens to a spool it does not know: link it to an existing one, or create a new one.
-3. When Connect reports higher consumption for a linked spool, the bridge deducts the difference in Spoolman.
+3. When Connect reports higher consumption for a linked spool, the bridge deducts the difference in Spoolman. If something else already deducts filament in Spoolman, such as a print tracker, turn off `TRACK_USAGE` so the same grams are not deducted twice.
 
 The bridge starts in dry-run mode. It reads everything and shows what it would do, but writes nothing to Spoolman until you turn that off.
 
@@ -110,6 +110,7 @@ Everything can be set in the browser and is saved in `data/config.json`. Environ
 | `WAREHOUSE_INTERVAL` | `600` | Seconds between reading the Connect warehouse |
 | `DRY_RUN` | `true` | Dry-run mode |
 | `AUTO_CREATE` | `false` | Create unknown spools without asking |
+| `TRACK_USAGE` | `true` | Deduct what the printer consumes in Spoolman. Turn off to only link spools and set their location |
 
 ## Security
 
