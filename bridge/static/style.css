@@ -71,6 +71,7 @@ body {
 a { color: var(--accent-text); }
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
+.test-band a { color: inherit; margin-left: 0.5rem; white-space: nowrap; }
 .test-band {
   margin: 0;
   padding: 0.5rem 1rem;
@@ -319,6 +320,10 @@ code { font-family: var(--code); font-size: 0.87rem; overflow-wrap: anywhere; }
 .compare td:first-child:has(.hint) { white-space: nowrap; }
 .compare thead th { color: var(--mute); font-size: 0.87rem; font-weight: 600; }
 .compare + form { margin-top: 1.5rem; }
+.compare .num { text-align: right; white-space: nowrap; padding-right: 0; padding-left: 0.75rem; }
+.go-live tfoot > tr > * { border-top: 1px solid var(--line); border-bottom: 0; }
+.go-live + .hint, .go-live ~ .hint { margin-top: 1rem; }
+.go-live ~ form { margin-top: 1.5rem; }
 .change-note { display: block; margin-top: 0.25rem; font-weight: 400; }
 .calls { margin: 0 0 1rem; padding-left: 1.25rem; }
 .calls li { margin-bottom: 0.5rem; }
@@ -427,6 +432,13 @@ details > label, details > .hint { margin-top: 0.75rem; }
   .changes td:nth-child(n + 3) { grid-column: 2; }
   .changes td:nth-child(3)::before { content: "Now: "; color: var(--mute); }
   .changes td:nth-child(4)::before { content: "After: "; color: var(--mute); }
+  .go-live tfoot { display: block; }
+  .go-live tfoot tr { grid-template-columns: minmax(0, 1fr) auto; border-bottom: 0; }
+  .go-live tfoot > tr > * { border-top: 0; }
+  .go-live .num { text-align: left; padding-left: 0; }
+  .go-live tbody td:nth-of-type(1)::before { content: "Counted so far: "; color: var(--mute); }
+  .go-live tbody td:nth-of-type(2)::before { content: "Connect now: "; color: var(--mute); }
+  .go-live tbody td:nth-of-type(3)::before { content: "Deducted: "; color: var(--mute); }
 }
 
 /* The warehouse page */

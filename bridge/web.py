@@ -374,6 +374,30 @@ def create_app(service: Service) -> Flask:
         flash(f"{prefix}: {error}", "error")
         return redirect(url_for("dashboard"))
 
+    @app.get("/go-live")
+    def go_live_review():
+        if not service.settings.dry_run:
+            return redirect(url_for("dashboard"))
+        step = next_step(service)
+        if step:
+            return redirect(url_for("setup", step=step))
+        try:
+            preview = service.go_live_preview()
+        except Exception as e:
+            return failed("Could not read spools from Spoolman", e)
+        return render_template("go_live.html", preview=preview)
+
+    @app.post("/go-live")
+    def go_live():
+        step = next_step(service)
+        if step:
+            return redirect(url_for("setup", step=step))
+        update_config(service.settings.data_dir, {"dry_run": False})
+        service.reload()
+        log.info("Dry run turned off from the dashboard")
+        flash("Dry run is off. The bridge now writes to Spoolman and deducts consumption on the next poll.", "ok")
+        return redirect(url_for("dashboard"))
+
     @app.get("/spool/review")
     def review_choice():
         """Reads only. The dashboard's choice opens the matching review page."""

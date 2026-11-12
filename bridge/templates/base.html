@@ -11,7 +11,7 @@
 </head>
 <body>
   {% if signed_in and settings.dry_run %}
-  <p class="test-band">Dry run: the bridge shows what it would do, but writes nothing to Spoolman.</p>
+  <p class="test-band">Dry run: the bridge shows what it would do, but writes nothing to Spoolman.{% if request.endpoint != 'go_live_review' %} <a href="{{ url_for('go_live_review') }}">Go live →</a>{% endif %}</p>
   {% endif %}
   {% macro nav_link(endpoint, label, icon, href=None) %}
   <a class="side-link" href="{{ href or url_for(endpoint) }}" {{ 'aria-current=page' if request.endpoint == endpoint }}>

@@ -48,7 +48,7 @@ Open `http://your-server:7913` and follow the steps:
 4. **Printers:** choose your printers and the location each one gets in Spoolman.
 5. **Operation:** choose dry run, whether new spools are created automatically, and how often to poll.
 
-Watch your first print in dry-run mode, then turn dry run off in the settings once the consumption looks right.
+Watch your first print in dry-run mode. When the consumption looks right, click **Go live** in the dry-run band. It shows what will be deducted from each linked spool before anything is written.
 
 ## Linking spools
 
