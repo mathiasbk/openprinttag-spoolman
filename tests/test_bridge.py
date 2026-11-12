@@ -450,6 +450,19 @@ def test_missing_extra_fields_are_created(respx_mock, tmp_path):
     assert filament_field.called
 
 
+@respx.mock(assert_all_called=False)
+def test_auto_create_skips_a_tag_without_density_and_keeps_polling(respx_mock, tmp_path, caplog):
+    """A tag written without density cannot become a filament; that must not fail the whole poll."""
+    mock_fields(respx_mock)
+    respx_mock.get(f"{SPOOLMAN}/api/v1/spool").respond(json=[])
+    data = printer(consumed=30)
+    data["fff"]["tools"][0]["materialPackageInstance"]["package"]["material"]["properties"] = {"density": None}
+    result = make_bridge(tmp_path, data, auto_create=True).poll()
+    assert result["tools"][0]["spool_id"] is None
+    assert writes(respx_mock) == []
+    assert any("density" in w for w in result["warnings"])
+
+
 def custom_tag_printer(consumed=0):
     data = printer(consumed=consumed, uuid="custom", from_nfc=False)
     instance = data["fff"]["tools"][0]["materialPackageInstance"]

@@ -90,6 +90,20 @@ def color_hex(rgba: str | None) -> str | None:
     return value[:6].upper()
 
 
+def missing_for_create(loaded: LoadedSpool) -> list[str]:
+    """What Connect did not report that creating a vendor, filament and spool needs."""
+    return [
+        name
+        for name, value in (
+            ("brand", loaded.brand),
+            ("material name", loaded.material_name),
+            ("density", loaded.density),
+            ("filament diameter", loaded.filament_diameter),
+        )
+        if value is None
+    ]
+
+
 def parse_loaded_spools(printer: dict) -> list[LoadedSpool]:
     spools = []
     for tool in (printer.get("fff") or {}).get("tools") or []:
@@ -505,6 +519,18 @@ class Bridge:
         if spool is None:
             if self.auto_create and loaded.is_from_nfc:
                 existing = self._likely_existing_spool(loaded, all_spools or [])
+                missing = missing_for_create(loaded)
+                if existing is None and missing:
+                    message = (
+                        f"Cannot create a spool for {loaded.display_name} automatically: the tag does not say its {', '.join(missing)}. "
+                        "Link it to an existing spool, or add what is missing and create it from the dashboard."
+                    )
+                    if warnings is not None:
+                        warnings.append(message)
+                    if loaded.uuid not in self._warned_unlinked:
+                        self._warned_unlinked.add(loaded.uuid)
+                        log.warning("%s", message)
+                    return None
                 if existing is None:
                     created = self.create_spool(loaded, location)
                     return created["id"] if created else None
@@ -684,16 +710,7 @@ class Bridge:
 
     def create_spool(self, loaded: LoadedSpool, location: str) -> dict | None:
         self._ensure_extra_fields()
-        problems = [
-            name
-            for name, value in (
-                ("brand", loaded.brand),
-                ("material name", loaded.material_name),
-                ("density", loaded.density),
-                ("filament diameter", loaded.filament_diameter),
-            )
-            if value is None
-        ]
+        problems = missing_for_create(loaded)
         if problems:
             raise SpoolmanError(f"Cannot create a spool for instance {loaded.uuid}; Connect did not report: {', '.join(problems)}")
         filament_id = self._find_or_create_filament(loaded)
