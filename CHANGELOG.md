@@ -9,6 +9,10 @@ Releases are cut from the Actions tab — see [docs/releases.md](docs/releases.m
 
 <!-- new releases go below this line -->
 
+## 0.4.0 - 2026-11-18
+
+- Release 0.4.0: self-hosted Prusa Connect and a tracking switch (#21)
+
 ## 0.3.0 - 2026-11-03
 
 - Release automatically when something lands on main
