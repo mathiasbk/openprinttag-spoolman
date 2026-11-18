@@ -27,6 +27,8 @@ STEPS = ("spoolman", "connect", "printers", "mode")
 MIN_PASSWORD_LENGTH = 8
 CA_FILENAME = "spoolman-ca.crt"
 NONCE_LIFETIME_SECONDS = 15 * 60
+# Connect counts whole grams, and the two can be a few grams apart while a print runs.
+WEIGHT_MISMATCH_GRAMS = 10
 CONSOLE_LINE = (
     "copy(JSON.stringify({access: localStorage.getItem('auth.access_token'), "
     "refresh: localStorage.getItem('auth.refresh_token')}))"
@@ -40,6 +42,7 @@ class LoginNonces:
         self.lifetime = lifetime
         self.lock = threading.Lock()
         self.expiries: dict[str, float] = {}
+        self.results: dict[str, tuple[float, str, str]] = {}
 
     def issue(self) -> str:
         nonce = secrets.token_urlsafe(24)
@@ -53,6 +56,21 @@ class LoginNonces:
         with self.lock:
             expiry = self.expiries.pop(nonce, 0) if isinstance(nonce, str) else 0
         return expiry > time.time()
+
+    def finish(self, nonce: str, state: str, message: str) -> None:
+        """Remember what a used code brought, so the setup page can tell: delivered, warning or failed."""
+        with self.lock:
+            now = time.time()
+            self.results = {n: r for n, r in self.results.items() if r[0] > now}
+            self.results[nonce] = (now + self.lifetime, state, message)
+
+    def status(self, nonce) -> tuple[str, str | None]:
+        """(state, message): delivered, warning or failed once used, otherwise waiting or expired."""
+        with self.lock:
+            if isinstance(nonce, str) and nonce in self.results:
+                _, state, message = self.results[nonce]
+                return state, message
+            return ("waiting" if self.expiries.get(nonce, 0) > time.time() else "expired"), None
 
 
 def bookmarklet(receive_url: str, nonce: str) -> str:
@@ -124,7 +142,7 @@ def next_step(service: Service) -> str | None:
     """The first wizard step that still needs doing."""
     if not service.settings.spoolman_url or not service.spoolman:
         return "spoolman"
-    if not service.store.exists():
+    if not service.connect_ready():
         return "connect"
     if not service.settings.printers:
         return "printers"
@@ -153,6 +171,12 @@ def create_app(service: Service) -> Flask:
     @app.template_filter("kilograms")
     def kilograms(value):
         return f"{round(value):d} g" if value < 1000 else f"{value / 1000:.1f} kg"
+
+    @app.template_filter("action_summary")
+    def action_summary(action):
+        """'Deducted 6 g from spool #55', or 'Would have deducted …' in a dry run."""
+        text = action["summary"]
+        return f"Would have {text[:1].lower()}{text[1:]}" if action["dry_run"] else text
 
     @app.template_filter("until")
     def until(timestamp):
@@ -202,15 +226,29 @@ def create_app(service: Service) -> Flask:
             return jsonify(ok=False, message="This login link has expired or was already used. Reload the setup page and drag the new link to your bookmarks."), 403
         parsed = parse_login_json(json.dumps({"access": data.get("access"), "refresh": data.get("refresh")}))
         if not parsed:
-            return jsonify(ok=False, message="No Prusa Connect login was found. Log in on connect.prusa3d.com first."), 400
+            message = "No Prusa Connect login was found. Log in on connect.prusa3d.com first."
+            nonces.finish(data["nonce"], "failed", message)
+            return jsonify(ok=False, message=message), 400
         try:
             me = service.log_in_to_connect(*parsed)
         except Exception as e:
             log.warning("A login from the bookmark was not accepted: %s", e)
-            return jsonify(ok=False, message=f"Connect rejected the login: {e}"), 400
+            message = f"Connect rejected the login: {str(e).rstrip('.')}."
+            nonces.finish(data["nonce"], "failed", message)
+            return jsonify(ok=False, message=message), 400
         if not parsed[1]:
-            return jsonify(ok=True, message=f"Logged in as {me.get('email')}, but there is no refresh token, so the bridge stops when the login expires.")
-        return jsonify(ok=True, message=f"Logged in as {me.get('email')}.")
+            message = f"Logged in as {me.get('email')}, but there is no refresh token, so the bridge stops when the login expires."
+            nonces.finish(data["nonce"], "warning", message)
+        else:
+            message = f"Logged in as {me.get('email')}."
+            nonces.finish(data["nonce"], "delivered", message)
+        return jsonify(ok=True, message=message)
+
+    @app.get("/setup/connect/status")
+    def login_status():
+        """The setup page asks this while it waits for the bookmark, so it can continue by itself."""
+        state, message = nonces.status(request.args.get("nonce"))
+        return jsonify(state=state, message=message)
 
     @app.get("/healthz")
     def healthz():
@@ -274,6 +312,16 @@ def create_app(service: Service) -> Flask:
                     view = dict(tool)
                     if tool["spool_id"]:
                         view["url"] = service.spoolman.spool_url(tool["spool_id"])
+                        linked = next((s for s in spools or [] if s["id"] == tool["spool_id"]), None)
+                        view["spoolman_remaining"] = linked.get("remaining_weight") if linked else None
+                        connect_remaining = tool["spool"].remaining_weight
+                        if view["spoolman_remaining"] is not None and connect_remaining is not None:
+                            difference = view["spoolman_remaining"] - connect_remaining
+                            view["weight_difference"] = difference if abs(difference) >= WEIGHT_MISMATCH_GRAMS else None
+                            # In a dry run Spoolman lags behind Connect by what has not been deducted yet,
+                            # unless deducting is off: then going live never closes the gap.
+                            view["not_deducted_yet"] = service.settings.dry_run and service.settings.track_usage and difference > 0
+                            view["track_usage"] = service.settings.track_usage
                     else:
                         view["candidates"] = service.link_candidates(tool["spool"], spools or [])
                     tools.append(view)
@@ -407,9 +455,12 @@ def create_app(service: Service) -> Flask:
                 context["available"] = []
                 flash(f"Could not read printers from Connect: {e}", "error")
         if step == "connect":
+            source = request.values.get("source") or service.settings.connect_source
+            context["source"] = source if source in ("cloud", "local") else "cloud"
             context["token"] = service.token_status()
             context["console_line"] = CONSOLE_LINE
-            context["bookmarklet"] = bookmarklet(url_for("receive_login", _external=True), nonces.issue())
+            context["nonce"] = nonces.issue()
+            context["bookmarklet"] = bookmarklet(url_for("receive_login", _external=True), context["nonce"])
         return render_template("setup.html", step=step, steps=STEPS, form=request.form, **context)
 
     def _post_spoolman():
@@ -442,6 +493,8 @@ def create_app(service: Service) -> Flask:
         return advance("spoolman")
 
     def _post_connect():
+        if request.form.get("source") == "local":
+            return _post_local_connect()
         raw = request.form.get("login", "").strip()
         parsed = parse_login_json(raw)
         if not parsed:
@@ -458,6 +511,29 @@ def create_app(service: Service) -> Flask:
         else:
             flash("The login works, but there is no refresh token, so the bridge stops when it expires.", "error")
         return advance("connect")
+
+    def _post_local_connect():
+        url = request.form.get("local_connect_url", "").strip().rstrip("/")
+        token = request.form.get("local_connect_token", "").strip()
+        verify = "verify_tls" in request.form
+        if urlparse(url).scheme not in ("http", "https") or not urlparse(url).netloc:
+            flash("Enter the address as http://server:8080 or https://connect.example.", "error")
+            return None
+        if not token and not service.settings.local_connect_token:
+            flash("Paste an API credential from the self-hosted Connect.", "error")
+            return None
+        test = request.form.get("action") == "test"
+        try:
+            printers = service.use_local_connect(url, token, verify, save=not test)
+        except Exception as e:
+            flash(f"Could not read the self-hosted Connect: {e}", "error")
+            return None
+        found = f"Found {len(printers)} printer{'' if len(printers) == 1 else 's'}."
+        if test:
+            request.environ["bridge.test_result"] = found
+            return None
+        flash(f"Saved. {found}", "ok")
+        return redirect(url_for("setup", step="printers"))
 
     def _post_printers():
         printers = []
@@ -499,6 +575,7 @@ def create_app(service: Service) -> Flask:
             {
                 "dry_run": request.form.get("dry_run") == "on",
                 "auto_create": request.form.get("auto_create") == "on",
+                "track_usage": request.form.get("track_usage") == "on",
                 "poll_interval": poll_interval,
                 "warehouse_interval": warehouse_interval,
             },

@@ -287,7 +287,7 @@ def test_review_warns_about_a_shared_filament(respx_mock, tmp_path):
 def test_dry_run_confirm_shows_the_calls_without_writing(respx_mock, tmp_path):
     client = signed_in(unlinked_service(respx_mock, tmp_path))
     page = client.post("/spool/link", data={"uuid": UUID, "spool_id": "52", "apply": ["spool_initial_weight"]}).text
-    assert "Dry run: would perform these writes" in page
+    assert "Dry run, so nothing was written." in page
     assert "PATCH /spool/52" in page
     assert spoolman_writes(respx_mock) == []
     page = client.post("/spool/create", data={"uuid": UUID, "name": "PC Blend Jet Black", "location": "Shelf"}).text
@@ -433,7 +433,8 @@ def test_recent_actions_show_their_text(respx_mock, tmp_path):
     assert service.poll_once() is True
     page = signed_in(service).get("/").text
     assert "PATCH /spool/52" in page
-    assert "Called" in page
+    assert "Moved spool #52 to Core One" in page
+    assert "Show details" in page
 
 
 def custom_graphql(request):
@@ -639,6 +640,17 @@ def test_a_warehouse_failure_does_not_stop_the_poll(respx_mock, tmp_path):
     service = warehouse_service(respx_mock, tmp_path, items=RuntimeError("down"))
     page = signed_in(service).get("/").text
     assert "Could not read the Connect warehouse" in page
+
+
+def test_mode_step_saves_track_usage(tmp_path):
+    service = make_service(tmp_path)
+    client = signed_in(service)
+    client.post("/setup/mode", data={"poll_interval": "60"})
+    assert read_config(tmp_path)["track_usage"] is False
+    assert service.settings.track_usage is False
+    client.post("/setup/mode", data={"poll_interval": "60", "track_usage": "on"})
+    assert read_config(tmp_path)["track_usage"] is True
+    assert service.settings.track_usage is True
 
 
 def test_the_warehouse_interval_can_be_saved(tmp_path):

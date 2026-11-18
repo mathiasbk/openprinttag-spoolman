@@ -54,8 +54,16 @@
 
       {% if tool.url %}
       <div class="tool-foot">
-        <a class="linked" href="{{ tool.url }}">✓ Linked to spool #{{ tool.spool_id }}</a>
+        <span class="linked-to">
+          <a class="linked" href="{{ tool.url }}">✓ Linked to spool #{{ tool.spool_id }}</a>
+          {% if tool.spoolman_remaining is not none %}<span class="spoolman-weight">Spoolman: <strong>{{ tool.spoolman_remaining|grams }}</strong> left</span>{% endif %}
+          {% if tool.weight_difference and tool.not_deducted_yet %}<span class="pill">{{ tool.weight_difference|grams }} not deducted yet</span>
+          {% elif tool.weight_difference %}<span class="pill pill-attention">{{ tool.weight_difference|abs|grams }} {{ 'more' if tool.weight_difference > 0 else 'less' }} than Connect</span>{% endif %}
+        </span>
         <a class="unlink" href="{{ url_for('unlink_review', spool_id=tool.spool_id) }}">Unlink</a>
+        {% if tool.weight_difference and tool.not_deducted_yet %}<p class="hint weight-note">Dry run is on, so what was used since the dry run started is not deducted in Spoolman yet. It is deducted when you go live.</p>
+        {% elif tool.weight_difference and not tool.track_usage %}<p class="hint weight-note">Spoolman and Connect disagree on what is left. Deducting is off, so Spoolman's weight comes from the other tool that deducts consumption. A print that is still running or a different estimate of what a print used can explain the gap.</p>
+        {% elif tool.weight_difference %}<p class="hint weight-note">Spoolman and Connect disagree on what is left. Usage from another printer, consumption before the spool was linked, a manual change in Spoolman or different spool weights can cause this. The bridge only deducts new consumption, so the difference stays until you correct it in <a href="{{ tool.url }}">Spoolman</a>.</p>{% endif %}
       </div>
       {% else %}
       <div class="unlinked">
@@ -70,7 +78,8 @@
   {% if printer.actions %}
   <details class="actions">
     <summary>Recent actions ({{ printer.actions|length }})</summary>
-    <ul>{% for action in printer.actions|reverse %}<li>{{ action.time|clock }} {{ 'Would call' if action.dry_run else 'Called' }} <code>{{ action.text }}</code></li>{% endfor %}</ul>
+    <ul class="action-list">{% for action in printer.actions|reverse %}<li><span class="action-time">{{ (action.time|clock)[:5] }}</span> {{ action|action_summary }}
+      <details class="action-call"><summary>Show details</summary><code>{{ action.text }}</code></details></li>{% endfor %}</ul>
   </details>
   {% endif %}
 </section>

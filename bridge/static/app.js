@@ -14,17 +14,53 @@ document.querySelectorAll("[data-menu-toggle]").forEach((toggle) => {
   fold();
 });
 
-// navigator.clipboard needs HTTPS, and this page usually runs on plain HTTP.
+// navigator.clipboard needs HTTPS, and this page usually runs on plain HTTP, so it falls back to a
+// selected text field. iOS Safari only copies from one that is editable and selected with setSelectionRange.
+const copyText = async (text) => {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to the old way.
+    }
+  }
+  const field = document.createElement("textarea");
+  field.value = text;
+  field.setAttribute("readonly", "");
+  field.style.position = "fixed";
+  field.style.top = "0";
+  field.style.opacity = "0";
+  field.style.fontSize = "16px";
+  document.body.append(field);
+  field.contentEditable = "true";
+  field.focus();
+  field.select();
+  field.setSelectionRange(0, text.length);
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  }
+  field.remove();
+  return copied;
+};
+
 document.querySelectorAll("[data-copy]").forEach((button) => {
-  button.addEventListener("click", () => {
+  button.addEventListener("click", async () => {
     const source = document.getElementById(button.dataset.copy);
-    const field = document.createElement("textarea");
-    field.value = source.textContent;
-    document.body.append(field);
-    field.select();
-    const copied = document.execCommand("copy");
-    field.remove();
-    button.textContent = copied ? "Copied" : "Select and copy it yourself";
+    if (await copyText(source.textContent)) {
+      button.textContent = "Copied";
+      return;
+    }
+    // Select the code itself, so a long press copies it.
+    const range = document.createRange();
+    range.selectNodeContents(source);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    button.textContent = "Selected. Copy it from the menu";
   });
 });
 
@@ -134,4 +170,57 @@ document.querySelectorAll("[data-inventory]").forEach((body) => {
     });
   });
   update();
+});
+
+// The Connect setup step waits for the bookmark and moves on once the login has arrived.
+document.querySelectorAll("[data-login-wait]").forEach((notice) => {
+  const loggedIn = notice.hasAttribute("data-logged-in");
+  // Someone who is already logged in may only be looking, so the wait stays quiet until something happens.
+  notice.hidden = loggedIn;
+  const show = (kind, text) => {
+    notice.hidden = false;
+    notice.classList.remove("ok", "error");
+    if (kind) notice.classList.add(kind);
+    notice.textContent = text;
+  };
+  const check = async () => {
+    let result;
+    try {
+      const response = await fetch(notice.dataset.loginWait, { headers: { Accept: "application/json" } });
+      if (response.redirected || !response.ok) {
+        // The admin session has expired, so the answer is the login page.
+        show("error", "");
+        notice.append("You were logged out of the bridge. ");
+        const link = document.createElement("a");
+        link.href = notice.dataset.loginPage;
+        link.textContent = "Log in again";
+        notice.append(link, ", then reload this page.");
+        return;
+      }
+      result = await response.json();
+    } catch {
+      // The bridge may be restarting; keep waiting.
+      setTimeout(check, 2000);
+      return;
+    }
+    if (result.state === "delivered") {
+      show("ok", `${result.message} Continuing…`);
+      setTimeout(() => { window.location.href = notice.dataset.loginNext; }, 1500);
+    } else if (result.state === "warning") {
+      // Important enough that the page must not move on before it is read.
+      show("error", `${result.message} `);
+      const link = document.createElement("a");
+      link.href = notice.dataset.loginNext;
+      link.textContent = "Continue anyway";
+      notice.append(link);
+    } else if (result.state === "failed") {
+      show("error", `${result.message} Reload this page to get a new bookmark and try again.`);
+    } else if (result.state === "expired") {
+      if (loggedIn) notice.hidden = true;
+      else show("error", "This bookmark has expired. Reload the page to get a new one.");
+    } else {
+      setTimeout(check, 2000);
+    }
+  };
+  setTimeout(check, 2000);
 });
