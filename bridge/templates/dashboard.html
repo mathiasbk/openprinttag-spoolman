@@ -62,6 +62,7 @@
         </span>
         <a class="unlink" href="{{ url_for('unlink_review', spool_id=tool.spool_id) }}">Unlink</a>
         {% if tool.weight_difference and tool.not_deducted_yet %}<p class="hint weight-note">Dry run is on, so what was used since the dry run started is not deducted in Spoolman yet. It is deducted when you go live.</p>
+        {% elif tool.weight_difference and not tool.track_usage %}<p class="hint weight-note">Spoolman and Connect disagree on what is left. Deducting is off, so Spoolman's weight comes from the other tool that deducts consumption. A print that is still running or a different estimate of what a print used can explain the gap.</p>
         {% elif tool.weight_difference %}<p class="hint weight-note">Spoolman and Connect disagree on what is left. Usage from another printer, consumption before the spool was linked, a manual change in Spoolman or different spool weights can cause this. The bridge only deducts new consumption, so the difference stays until you correct it in <a href="{{ tool.url }}">Spoolman</a>.</p>{% endif %}
       </div>
       {% else %}

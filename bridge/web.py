@@ -318,8 +318,10 @@ def create_app(service: Service) -> Flask:
                         if view["spoolman_remaining"] is not None and connect_remaining is not None:
                             difference = view["spoolman_remaining"] - connect_remaining
                             view["weight_difference"] = difference if abs(difference) >= WEIGHT_MISMATCH_GRAMS else None
-                            # In a dry run Spoolman lags behind Connect by what has not been deducted yet.
-                            view["not_deducted_yet"] = service.settings.dry_run and difference > 0
+                            # In a dry run Spoolman lags behind Connect by what has not been deducted yet,
+                            # unless deducting is off: then going live never closes the gap.
+                            view["not_deducted_yet"] = service.settings.dry_run and service.settings.track_usage and difference > 0
+                            view["track_usage"] = service.settings.track_usage
                     else:
                         view["candidates"] = service.link_candidates(tool["spool"], spools or [])
                     tools.append(view)
@@ -573,6 +575,7 @@ def create_app(service: Service) -> Flask:
             {
                 "dry_run": request.form.get("dry_run") == "on",
                 "auto_create": request.form.get("auto_create") == "on",
+                "track_usage": request.form.get("track_usage") == "on",
                 "poll_interval": poll_interval,
                 "warehouse_interval": warehouse_interval,
             },

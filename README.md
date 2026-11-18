@@ -15,7 +15,7 @@ The bridge reads each loaded spool's OpenPrintTag data from Prusa Connect, links
 
 1. Every minute, the bridge asks Prusa Connect's GraphQL API what each printer has loaded. Connect reports the OpenPrintTag data read from the spool's NFC tag, including its instance UUID.
 2. It looks that UUID up in the `opt_instance_uuid` extra field in Spoolman. You choose what happens to a spool it does not know: link it to an existing one, or create a new one.
-3. When Connect reports higher consumption for a linked spool, the bridge deducts the difference in Spoolman.
+3. When Connect reports higher consumption for a linked spool, the bridge deducts the difference in Spoolman. If something else already deducts filament in Spoolman, such as a print tracker, turn off `TRACK_USAGE` so the same grams are not deducted twice.
 
 The bridge can also read a [self-hosted Prusa Connect](https://github.com/prusa3d/prusa-connect) server instead of connect.prusa3d.com. See [Self-hosted Prusa Connect](#self-hosted-prusa-connect).
 
@@ -129,6 +129,7 @@ Everything can be set in the browser and is saved in `data/config.json`. Environ
 | `WAREHOUSE_INTERVAL` | `600` | Seconds between reading the Connect warehouse |
 | `DRY_RUN` | `true` | Dry-run mode |
 | `AUTO_CREATE` | `false` | Create unknown spools without asking |
+| `TRACK_USAGE` | `true` | Deduct what the printer consumes in Spoolman. Turn off to only link spools and set their location. While it is off, the bridge still moves its consumption marker, so turning it back on deducts only new usage |
 | `CONNECT_SOURCE` | `cloud` | `local` reads a self-hosted Prusa Connect server instead of connect.prusa3d.com |
 | `LOCAL_CONNECT_URL` | None | Address of the self-hosted server, such as `http://server:8080` |
 | `LOCAL_CONNECT_TOKEN` | None | API credential from the self-hosted server |

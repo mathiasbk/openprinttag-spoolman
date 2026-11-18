@@ -140,10 +140,10 @@ class Poller:
         return self.bridge.poll(PRINTER)
 
 
-def make_bridge(tmp_path, data, dry_run=False, auto_create=True, source="cloud"):
+def make_bridge(tmp_path, data, dry_run=False, auto_create=True, track_usage=True, source="cloud"):
     s = settings(tmp_path, dry_run)
     state = State(s.state_path, dry_run, source)
-    return Poller(Bridge(FakeConnect(data), SpoolmanClient(s, httpx.Client()), state, auto_create))
+    return Poller(Bridge(FakeConnect(data), SpoolmanClient(s, httpx.Client()), state, auto_create, track_usage))
 
 
 def writes(mock):
@@ -176,6 +176,48 @@ def test_first_sighting_of_existing_spool_only_sets_baseline(respx_mock, tmp_pat
     assert [json.loads(c.request.content) for c in patch.calls] == [{"extra": linked_extra(100.0)}]
     assert len(writes(respx_mock)) == 1
     assert json.loads((tmp_path / "state.json").read_text())["consumed"][UUID] == 100
+
+
+@respx.mock(assert_all_called=False)
+def test_tracking_off_moves_only_the_marker(respx_mock, tmp_path):
+    """Something else deducts, so used_weight is never written, but the marker follows Connect."""
+    mock_fields(respx_mock)
+    patch = mock_deduction(respx_mock, existing_spool(extra=linked_extra(10, card_uids=json.dumps("ABC"))))
+    make_bridge(tmp_path, printer(consumed=12.5), track_usage=False).poll()
+    assert patch.call_count == 1
+    body = json.loads(patch.calls[0].request.content)
+    assert body == {"extra": linked_extra(12.5, card_uids=json.dumps("ABC"))}
+
+
+@respx.mock(assert_all_called=False)
+def test_tracking_off_baseline_writes_no_used_weight(respx_mock, tmp_path):
+    mock_fields(respx_mock)
+    patch = mock_deduction(respx_mock, existing_spool(extra=linked_extra()))
+    make_bridge(tmp_path, printer(consumed=100), track_usage=False).poll()
+    assert all("used_weight" not in json.loads(c.request.content) for c in patch.calls)
+
+
+@respx.mock(assert_all_called=False)
+def test_turning_tracking_on_deducts_only_new_usage(respx_mock, tmp_path):
+    """Marker at 10 g, 50 g used while off, then on: nothing is deducted twice, and later usage is."""
+    mock_fields(respx_mock)
+    spool = existing_spool(extra=linked_extra(10))
+
+    def update(request):
+        body = json.loads(request.content)
+        spool.update(body)
+        return httpx.Response(200, json=spool)
+
+    respx_mock.get(f"{SPOOLMAN}/api/v1/spool").mock(side_effect=lambda r: httpx.Response(200, json=[spool]))
+    respx_mock.get(f"{SPOOLMAN}/api/v1/spool/42").mock(side_effect=lambda r: httpx.Response(200, json=spool))
+    respx_mock.patch(f"{SPOOLMAN}/api/v1/spool/42").mock(side_effect=update)
+
+    make_bridge(tmp_path, printer(consumed=60), track_usage=False).poll()
+    assert spool["used_weight"] == 100.0
+    make_bridge(tmp_path, printer(consumed=60)).poll()
+    assert spool["used_weight"] == 100.0
+    make_bridge(tmp_path, printer(consumed=65)).poll()
+    assert spool["used_weight"] == 105.0
 
 
 def mock_deduction(mock, spool):
@@ -727,6 +769,16 @@ def test_dry_run_and_no_auto_create_are_the_defaults(tmp_path):
     assert s.printers == ()
 
 
+def test_track_usage_is_on_by_default(tmp_path):
+    assert load_settings({"DATA_DIR": str(tmp_path)}).track_usage is True
+    assert load_settings({"DATA_DIR": str(tmp_path), "TRACK_USAGE": "false"}).track_usage is False
+
+
+def test_saved_track_usage_wins_over_env(tmp_path):
+    update_config(tmp_path, {"track_usage": False})
+    assert load_settings({"DATA_DIR": str(tmp_path), "TRACK_USAGE": "true"}).track_usage is False
+
+
 def test_old_env_file_still_describes_one_printer(tmp_path):
     s = load_settings({"DATA_DIR": str(tmp_path), "CONNECT_PRINTER_UUID": "p", "CONNECT_ORGANIZATION_ID": "o", "LOCATION_NAME": "Shelf", "DRY_RUN": "false"})
     assert s.printers == (PrinterConfig(uuid="p", organization_id="o", location="Shelf"),)
@@ -874,6 +926,14 @@ def test_more_usage_in_spoolman_keeps_its_value_by_default(used, checked, noted)
     row = changes["spool_used_weight"]
     assert row["checked"] is checked
     assert bool(row["note"]) is noted
+    assert changes["spool_initial_weight"]["checked"] is True
+
+
+def test_consumed_is_unticked_when_tracking_is_off():
+    """Something else owns used_weight, so linking must not overwrite it by default."""
+    changes = {c["key"]: c for c in build_link_changes(loaded_spool(30), {**SPOOL_52, "used_weight": 0.0}, 0, track_usage=False)}
+    assert changes["spool_used_weight"]["checked"] is False
+    assert changes["spool_used_weight"]["note"]
     assert changes["spool_initial_weight"]["checked"] is True
 
 
