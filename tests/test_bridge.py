@@ -140,9 +140,10 @@ class Poller:
         return self.bridge.poll(PRINTER)
 
 
-def make_bridge(tmp_path, data, dry_run=False, auto_create=True, track_usage=True):
+def make_bridge(tmp_path, data, dry_run=False, auto_create=True, track_usage=True, source="cloud"):
     s = settings(tmp_path, dry_run)
-    return Poller(Bridge(FakeConnect(data), SpoolmanClient(s, httpx.Client()), State(s.state_path, dry_run), auto_create, track_usage))
+    state = State(s.state_path, dry_run, source)
+    return Poller(Bridge(FakeConnect(data), SpoolmanClient(s, httpx.Client()), state, auto_create, track_usage))
 
 
 def writes(mock):
@@ -259,6 +260,38 @@ def test_the_marker_in_spoolman_wins_over_the_local_state(respx_mock, tmp_path):
     make_bridge(tmp_path, printer(consumed=12)).poll()
     assert patch.call_count == 0
     assert writes(respx_mock) == []
+
+
+@respx.mock(assert_all_called=False)
+def test_a_change_of_source_starts_from_a_new_baseline(respx_mock, tmp_path):
+    """The cloud counted 40 g on this spool; the self-hosted server counts 55 g. Nothing is deducted for the gap."""
+    (tmp_path / "state.json").write_text(json.dumps({"consumed": {UUID: 40}, "source": "cloud"}))
+    mock_fields(respx_mock)
+    patch = mock_deduction(respx_mock, existing_spool(extra=linked_extra(40)))
+    make_bridge(tmp_path, printer(consumed=55), source="local").poll()
+    assert [json.loads(c.request.content) for c in patch.calls] == [{"extra": linked_extra(55.0)}]
+    saved = json.loads((tmp_path / "state.json").read_text())
+    assert saved["source"] == "local" and saved["consumed"] == {UUID: 55}
+
+
+@respx.mock(assert_all_called=False)
+def test_after_the_new_baseline_the_new_source_deducts_as_usual(respx_mock, tmp_path):
+    (tmp_path / "state.json").write_text(json.dumps({"consumed": {UUID: 40}, "source": "cloud"}))
+    mock_fields(respx_mock)
+    mock_deduction(respx_mock, existing_spool(extra=linked_extra(40)))
+    make_bridge(tmp_path, printer(consumed=55), source="local").poll()
+    respx_mock.reset()
+    patch = mock_deduction(respx_mock, existing_spool(extra=linked_extra(55)))
+    # A restart before every spool was seen again keeps the switch in mind, but not for this spool.
+    make_bridge(tmp_path, printer(consumed=58), source="local").poll()
+    body = json.loads(patch.calls[0].request.content)
+    assert body["used_weight"] == 103 and body["extra"] == linked_extra(58.0)
+
+
+def test_a_state_file_from_before_sources_counts_as_cloud(tmp_path):
+    (tmp_path / "state.json").write_text(json.dumps({"consumed": {UUID: 40}}))
+    state = State(tmp_path / "state.json", False, "cloud")
+    assert state.previous(UUID) == 40 and not state.needs_baseline(UUID)
 
 
 @respx.mock(assert_all_called=False)

@@ -13,6 +13,7 @@ DEFAULT_ACCOUNT_URL = "https://account.prusa3d.com"
 DEFAULT_ACCOUNT_CLIENT_ID = "MRHTlZhZqkNrrQ6FUPtjyusAz8nc59ErHXP8XkS4"
 DEFAULT_GRAPHQL_URL = "https://connect-api.prusa3d.com/graphql"
 DEFAULT_WEB_PORT = 7913
+SOURCES = ("cloud", "local")
 
 
 class ConfigError(Exception):
@@ -68,6 +69,16 @@ class Settings:
     account_url: str = DEFAULT_ACCOUNT_URL
     account_client_id: str = DEFAULT_ACCOUNT_CLIENT_ID
     graphql_url: str = DEFAULT_GRAPHQL_URL
+    # "cloud" is connect.prusa3d.com, "local" a self-hosted Prusa Connect server.
+    connect_source: str = "cloud"
+    local_connect_url: str = ""
+    local_connect_token: str = ""
+    local_connect_verify_tls: bool = True
+    local_connect_ca_bundle: str | None = None
+
+    @property
+    def is_local(self) -> bool:
+        return self.connect_source == "local"
 
     @property
     def tokens_path(self) -> Path:
@@ -154,6 +165,9 @@ def load_settings(env: dict | None = None) -> Settings:
         raise ConfigError("POLL_INTERVAL must be at least 10 seconds")
     if warehouse_interval < 60:
         raise ConfigError("WAREHOUSE_INTERVAL must be at least 60 seconds")
+    source = (value("connect_source", "CONNECT_SOURCE") or "cloud").strip().lower()
+    if source not in SOURCES:
+        raise ConfigError(f"CONNECT_SOURCE must be cloud or local, got {source!r}")
     return Settings(
         spoolman_url=(value("spoolman_url", "SPOOLMAN_URL") or "").rstrip("/"),
         spoolman_ca_bundle=value("spoolman_ca_bundle", "SPOOLMAN_CA_BUNDLE") or None,
@@ -169,4 +183,11 @@ def load_settings(env: dict | None = None) -> Settings:
         account_url=(env.get("CONNECT_ACCOUNT_URL") or DEFAULT_ACCOUNT_URL).rstrip("/"),
         account_client_id=env.get("CONNECT_ACCOUNT_CLIENT_ID") or DEFAULT_ACCOUNT_CLIENT_ID,
         graphql_url=env.get("CONNECT_GRAPHQL_URL") or DEFAULT_GRAPHQL_URL,
+        connect_source=source,
+        local_connect_url=(value("local_connect_url", "LOCAL_CONNECT_URL") or "").strip().rstrip("/"),
+        local_connect_token=(value("local_connect_token", "LOCAL_CONNECT_TOKEN") or "").strip(),
+        local_connect_verify_tls=_flag(
+            value("local_connect_verify_tls", "LOCAL_CONNECT_VERIFY_TLS"), "LOCAL_CONNECT_VERIFY_TLS", True
+        ),
+        local_connect_ca_bundle=value("local_connect_ca_bundle", "LOCAL_CONNECT_CA_BUNDLE") or None,
     )

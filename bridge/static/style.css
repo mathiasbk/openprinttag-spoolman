@@ -450,7 +450,9 @@ details > label, details > .hint { margin-top: 0.75rem; }
   color: var(--mute);
   font-weight: 500;
 }
-.segment[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.segment[aria-pressed="true"], .segment[aria-current] { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+a.segment { text-decoration: none; }
+.source-choice { margin-bottom: 1rem; }
 .sort { display: inline-flex; align-items: center; gap: 0.5rem; color: var(--mute); font-weight: 500; }
 .sort select { width: auto; }
 .materials { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }

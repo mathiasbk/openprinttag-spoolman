@@ -142,7 +142,7 @@ def next_step(service: Service) -> str | None:
     """The first wizard step that still needs doing."""
     if not service.settings.spoolman_url or not service.spoolman:
         return "spoolman"
-    if not service.store.exists():
+    if not service.connect_ready():
         return "connect"
     if not service.settings.printers:
         return "printers"
@@ -455,6 +455,8 @@ def create_app(service: Service) -> Flask:
                 context["available"] = []
                 flash(f"Could not read printers from Connect: {e}", "error")
         if step == "connect":
+            source = request.values.get("source") or service.settings.connect_source
+            context["source"] = source if source in ("cloud", "local") else "cloud"
             context["token"] = service.token_status()
             context["console_line"] = CONSOLE_LINE
             context["nonce"] = nonces.issue()
@@ -491,6 +493,8 @@ def create_app(service: Service) -> Flask:
         return advance("spoolman")
 
     def _post_connect():
+        if request.form.get("source") == "local":
+            return _post_local_connect()
         raw = request.form.get("login", "").strip()
         parsed = parse_login_json(raw)
         if not parsed:
@@ -507,6 +511,29 @@ def create_app(service: Service) -> Flask:
         else:
             flash("The login works, but there is no refresh token, so the bridge stops when it expires.", "error")
         return advance("connect")
+
+    def _post_local_connect():
+        url = request.form.get("local_connect_url", "").strip().rstrip("/")
+        token = request.form.get("local_connect_token", "").strip()
+        verify = "verify_tls" in request.form
+        if urlparse(url).scheme not in ("http", "https") or not urlparse(url).netloc:
+            flash("Enter the address as http://server:8080 or https://connect.example.", "error")
+            return None
+        if not token and not service.settings.local_connect_token:
+            flash("Paste an API credential from the self-hosted Connect.", "error")
+            return None
+        test = request.form.get("action") == "test"
+        try:
+            printers = service.use_local_connect(url, token, verify, save=not test)
+        except Exception as e:
+            flash(f"Could not read the self-hosted Connect: {e}", "error")
+            return None
+        found = f"Found {len(printers)} printer{'' if len(printers) == 1 else 's'}."
+        if test:
+            request.environ["bridge.test_result"] = found
+            return None
+        flash(f"Saved. {found}", "ok")
+        return redirect(url_for("setup", step="printers"))
 
     def _post_printers():
         printers = []

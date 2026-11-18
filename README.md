@@ -17,6 +17,8 @@ The bridge reads each loaded spool's OpenPrintTag data from Prusa Connect, links
 2. It looks that UUID up in the `opt_instance_uuid` extra field in Spoolman. You choose what happens to a spool it does not know: link it to an existing one, or create a new one.
 3. When Connect reports higher consumption for a linked spool, the bridge deducts the difference in Spoolman. If something else already deducts filament in Spoolman, such as a print tracker, turn off `TRACK_USAGE` so the same grams are not deducted twice.
 
+The bridge can also read a [self-hosted Prusa Connect](https://github.com/prusa3d/prusa-connect) server instead of connect.prusa3d.com. See [Self-hosted Prusa Connect](#self-hosted-prusa-connect).
+
 The bridge starts in dry-run mode. It reads everything and shows what it would do, but writes nothing to Spoolman until you turn that off.
 
 ## Requirements
@@ -44,7 +46,7 @@ Open `http://your-server:7913` and follow the steps:
 
 1. **Password:** choose an admin password. Do this right away, because whoever opens the page first sets it.
 2. **Spoolman:** enter the address and test the connection. If you use HTTPS with your own CA, upload the root certificate here.
-3. **Prusa Connect:** drag the button to your bookmarks bar, log in on connect.prusa3d.com in a private window, and click the bookmark. The setup page notices the login and continues by itself. On a phone, copy the bookmark code from the page and paste it as the address of a new bookmark. Prusa has no login for tools like this, so the bookmark copies it from your browser once. The bridge renews it after that. You can paste the login by hand instead.
+3. **Prusa Connect:** if your printers report to your own server, choose **Self-hosted Connect** and see [below](#self-hosted-prusa-connect). Otherwise drag the button to your bookmarks bar, log in on connect.prusa3d.com in a private window, and click the bookmark. The setup page notices the login and continues by itself. On a phone, copy the bookmark code from the page and paste it as the address of a new bookmark. Prusa has no login for tools like this, so the bookmark copies it from your browser once. The bridge renews it after that. You can paste the login by hand instead.
 4. **Printers:** choose your printers and the location each one gets in Spoolman.
 5. **Operation:** choose dry run, whether new spools are created automatically, and how often to poll.
 
@@ -93,6 +95,23 @@ The dashboard shows what Spoolman has left next to Connect's number for each lin
 
 `data/state.json` keeps a local copy and is used for spools linked before the field existed. It is updated only after Spoolman has answered. A dry run stores only its first baseline, so what is used during the dry run is deducted when you turn writing on.
 
+## Self-hosted Prusa Connect
+
+Prusa publishes a [Prusa Connect server you run yourself](https://github.com/prusa3d/prusa-connect). Its Materials extension keeps your spools, adds the ones a printer reads from an NFC tag, and counts what each tool feeds. The bridge reads it over that server's own REST API, so no browser login is needed.
+
+1. Install the **Materials** extension in the server from the marketplace, and switch it on.
+2. In the server, open **Settings**, **API credentials** and create one with the **read** scope.
+3. In the bridge setup, choose **Self-hosted Connect** on the Prusa Connect step, enter the server's address (for example `http://server:8080`) and paste the credential. **Test connection** lists the printers it found.
+4. Choose the printers as usual.
+
+What changes compared to connect.prusa3d.com:
+
+- **Spools come from Materials:** the Warehouse page lists the spools in Materials, and a spool's consumption is its full weight minus what Materials says is left.
+- **Spools without a tag work too:** a spool you put on a tool in Materials gets its own ID there, and Materials counts its use from the printer's odometer. Link it to a Spoolman spool once, and the bridge deducts its use like any other. It is never created automatically, because it was not read from a tag.
+- **Same tags, same IDs:** a tagged spool has the tag's UUID in both, so a link made while using connect.prusa3d.com keeps working after you move the printer.
+- **Switching:** a printer reports to one Connect at a time. Switching the bridge between connect.prusa3d.com and your own server forgets the chosen printers, so you choose them again. Each spool also starts counting again from what the new source reports the first time it sees it, because the two count used grams from different starting points. Nothing is deducted for that difference, and what was printed between the last read of the old source and the first read of the new one is not deducted either.
+- **Beta:** the self-hosted server is in public beta, and its API can change between releases.
+
 ## Configuration
 
 Everything can be set in the browser and is saved in `data/config.json`. Environment variables and `.env` are defaults for anything not saved there. See `.env.example`.
@@ -111,10 +130,15 @@ Everything can be set in the browser and is saved in `data/config.json`. Environ
 | `DRY_RUN` | `true` | Dry-run mode |
 | `AUTO_CREATE` | `false` | Create unknown spools without asking |
 | `TRACK_USAGE` | `true` | Deduct what the printer consumes in Spoolman. Turn off to only link spools and set their location. While it is off, the bridge still moves its consumption marker, so turning it back on deducts only new usage |
+| `CONNECT_SOURCE` | `cloud` | `local` reads a self-hosted Prusa Connect server instead of connect.prusa3d.com |
+| `LOCAL_CONNECT_URL` | None | Address of the self-hosted server, such as `http://server:8080` |
+| `LOCAL_CONNECT_TOKEN` | None | API credential from the self-hosted server |
+| `LOCAL_CONNECT_VERIFY_TLS` | `true` | `false` turns off the certificate check for the self-hosted server |
+| `LOCAL_CONNECT_CA_BUNDLE` | System CAs | Root certificate for a self-hosted server on HTTPS |
 
 ## Security
 
-- **Your Prusa account:** `data/` holds a login that gives access to your Prusa Connect account. Files with secrets have mode `600` and are never shown in the browser. Keep the folder private.
+- **Your Prusa account:** `data/` holds a login that gives access to your Prusa Connect account, or the API credential of your self-hosted server. Files with secrets have mode `600` and are never shown in the browser. Keep the folder private.
 - **Plain HTTP:** the password and login travel unencrypted over your network. Use the bridge only on a network you trust, or put it behind a reverse proxy with HTTPS. Do not expose it to the internet.
 - **Login bookmark:** it holds a one-time code that expires after 15 minutes. It sends your login to the bridge in the URL fragment, which stays out of server logs.
 - **First visitor:** whoever opens the page first chooses the password.

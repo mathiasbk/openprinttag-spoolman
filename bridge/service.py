@@ -8,8 +8,9 @@ import time
 from collections import deque
 from dataclasses import replace
 
-from .config import ConfigError, Settings, load_settings
+from .config import ConfigError, Settings, load_settings, update_config
 from .connect import ConnectAuthError, ConnectClient, TokenStore, Tokens, jwt_expiry
+from .local_connect import LocalConnectClient
 from .spoolman import SpoolmanClient, extra_value
 from .sync import SPOOL_UUID_FIELD, Bridge, LoadedSpool, State, build_link_changes, parse_warehouse_items, rank_spools_for_link
 
@@ -56,7 +57,7 @@ class Service:
         with self.lock:
             try:
                 self.settings = load_settings(self.env)
-                self.connect = ConnectClient(self.settings, TokenStore(self.settings.tokens_path))
+                self.connect = self._connect_client(self.settings)
                 self.spoolman = SpoolmanClient(self.settings) if self.settings.spoolman_url else None
                 self.config_error = None
             except ConfigError as e:
@@ -66,16 +67,43 @@ class Service:
             self.bridge = None
             self.warehouse_due = 0.0
             if self.spoolman and self.connect:
-                state = State(self.settings.state_path, self.settings.dry_run)
+                state = State(self.settings.state_path, self.settings.dry_run, self.settings.connect_source)
                 self.bridge = Bridge(self.connect, self.spoolman, state, self.settings.auto_create, self.settings.track_usage)
         self.wake.set()
+
+    @staticmethod
+    def _connect_client(settings: Settings):
+        if settings.is_local:
+            return LocalConnectClient(settings)
+        return ConnectClient(settings, TokenStore(settings.tokens_path))
 
     @property
     def store(self) -> TokenStore:
         return TokenStore(self.settings.tokens_path)
 
+    def connect_ready(self) -> bool:
+        """Whether there is something to log in to Connect with: the cloud login or the self-hosted credential."""
+        if self.settings.is_local:
+            return bool(self.settings.local_connect_url and self.settings.local_connect_token)
+        return self.store.exists()
+
+    def _switch_source(self, source: str, changes: dict) -> None:
+        """Printers belong to one source, so a change of source forgets the chosen printers."""
+        if self.settings.connect_source != source:
+            changes = {**changes, "printers": []}
+        update_config(self.settings.data_dir, {"connect_source": source, **changes})
+        self.reload()
+
     def token_status(self) -> dict:
         """What the interface may show about the login. Never the tokens themselves."""
+        if self.settings.is_local:
+            return {
+                "logged_in": self.connect_ready(),
+                "local": True,
+                "url": self.settings.local_connect_url,
+                "has_refresh": True,
+                "error": self.last_auth_error,
+            }
         if not self.store.exists():
             return {"logged_in": False}
         try:
@@ -96,7 +124,7 @@ class Service:
             previous = self.store.load() if self.store.exists() else None
             self.store.save(Tokens(access, refresh))
             try:
-                me = self.connect.me()
+                me = ConnectClient(self.settings, self.store).me()
             except Exception:
                 if previous:
                     self.store.save(previous)
@@ -105,13 +133,40 @@ class Service:
                 raise
             self.login_email = me.get("email")
             self.last_auth_error = None
+            if self.settings.is_local:
+                self._switch_source("cloud", {})
         self.wake.set()
         return me
+
+    def use_local_connect(self, url: str, token: str, verify_tls: bool, save: bool = True) -> list[dict]:
+        """Checks the self-hosted server with these details and returns its printers. With save, also switches to it.
+
+        An empty token keeps the stored one, so the form never has to show it.
+        """
+        token = token or self.settings.local_connect_token
+        trial = replace(
+            self.settings,
+            connect_source="local",
+            local_connect_url=url,
+            local_connect_token=token,
+            local_connect_verify_tls=verify_tls,
+        )
+        with self.lock:
+            client = LocalConnectClient(trial)
+            client.me()
+            printers = client.list_printers()
+            if save:
+                self.last_auth_error = None
+                self._switch_source(
+                    "local", {"local_connect_url": url, "local_connect_token": token, "local_connect_verify_tls": verify_tls}
+                )
+        self.wake.set()
+        return printers
 
     def poll_once(self) -> bool:
         """Poll every enabled printer. Returns False if any of them failed."""
         with self.lock:
-            if not self.bridge or not self.settings.enabled_printers or not self.store.exists():
+            if not self.bridge or not self.settings.enabled_printers or not self.connect_ready():
                 return True
             ok = True
             for config in self.settings.enabled_printers:

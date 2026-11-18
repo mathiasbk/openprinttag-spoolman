@@ -32,9 +32,45 @@
 </div>
 
 {% elif step == 'connect' %}
-<h1>Log in to Prusa Connect</h1>
+<h1>{{ 'Connect to your Prusa Connect server' if source == 'local' else 'Log in to Prusa Connect' }}</h1>
+<nav class="segments source-choice" aria-label="Where your printers report">
+  <a class="segment" href="{{ url_for('setup', step='connect', source='cloud') }}" {% if source == 'cloud' %}aria-current="page"{% endif %}>connect.prusa3d.com</a>
+  <a class="segment" href="{{ url_for('setup', step='connect', source='local') }}" {% if source == 'local' %}aria-current="page"{% endif %}>Self-hosted Connect</a>
+</nav>
+{% if source == 'local' %}
 <div class="card panel">
-{% if token.logged_in %}
+{% if token.local and token.logged_in %}
+<p class="notice {{ 'error' if token.error else 'ok' }}">
+  Using the self-hosted Connect at {{ token.url }}.{% if token.error %} The last read failed: {{ token.error }}{% endif %}
+</p>
+<p><a href="{{ url_for('setup', step='printers') }}">Continue</a> or change the details below.</p>
+{% elif not settings.is_local %}
+<p class="notice">The bridge now reads connect.prusa3d.com. Saving here switches it to your own server, and you choose the printers again.</p>
+{% endif %}
+<p class="lead">Your printers report to a <a href="https://github.com/prusa3d/prusa-connect" target="_blank" rel="noopener">self-hosted Prusa Connect</a> server, and its Materials extension keeps the spools. The bridge reads them with an API credential.</p>
+<form method="post" class="stack" autocomplete="off">
+  <input type="hidden" name="source" value="local">
+  <label>Server address
+    <input name="local_connect_url" type="url" required placeholder="http://server:8080" value="{{ form.get('local_connect_url', settings.local_connect_url) }}">
+  </label>
+  <label>API credential
+    <input name="local_connect_token" type="password" autocomplete="off" spellcheck="false" {% if not settings.local_connect_token %}required{% endif %} placeholder="{{ 'Stored. Leave empty to keep it' if settings.local_connect_token else 'pcl_...' }}">
+  </label>
+  <p class="hint">In the server, open Settings, API credentials and create one with the read scope. Install the Materials extension from the marketplace if it is not there.</p>
+  <label class="check"><input type="checkbox" name="verify_tls" {{ 'checked' if settings.local_connect_verify_tls }}> Check the HTTPS certificate</label>
+  {% if test %}<p class="notice ok" role="status">{{ test }}</p>{% endif %}
+  <div class="buttons">
+    <button name="action" value="save">Save and continue</button>
+    <button name="action" value="test" class="quiet">Test connection</button>
+  </div>
+</form>
+</div>
+{% else %}
+<div class="card panel">
+{% if settings.is_local %}
+<p class="notice">The bridge now reads your self-hosted Connect. Logging in here switches it to connect.prusa3d.com, and you choose the printers again.</p>
+{% endif %}
+{% if token.logged_in and not token.local %}
 <p class="notice {{ 'error' if token.error or not token.has_refresh else 'ok' }}">
   {% if token.email %}Logged in as {{ token.email }}. {% else %}A login is stored. {% endif %}
   {% if token.has_refresh %}Automatic renewal is on.{% else %}There is no refresh token, so the login stops working in {{ token.expires|until }}.{% endif %}
@@ -75,6 +111,7 @@
   </form>
 </details>
 </div>
+{% endif %}
 
 {% elif step == 'printers' %}
 <h1>Choose printers</h1>
@@ -93,7 +130,7 @@
   <button>Save and continue</button>
 </form>
 {% else %}
-<p>No printers found. Check that you are <a href="{{ url_for('setup', step='connect') }}">logged in to Connect</a> with the right account.</p>
+<p>No printers found. Check that you are <a href="{{ url_for('setup', step='connect') }}">connected to Connect</a> with the right account.</p>
 {% endif %}
 </div>
 

@@ -404,22 +404,40 @@ class State:
 
     A dry run keeps only its first baseline on disk, under dry_baseline. Going live
     continues from there, so consumption during the dry run is still deducted.
+
+    The cloud and a self-hosted Connect count consumed grams from different starting points.
+    After a change of source every spool therefore starts from a new baseline the first time
+    the new source reports it, instead of deducting the difference between the two counters.
     """
 
-    def __init__(self, path: Path, dry_run: bool):
+    def __init__(self, path: Path, dry_run: bool, source: str = "cloud"):
         self.path = path
         self.dry_run = dry_run
+        self.source = source
         self.consumed: dict[str, float] = {}
         self.dry_baseline: dict[str, float] = {}
+        self.rebaseline = False
         self._seen: dict[str, float] = {}
         try:
             data = json.loads(path.read_text())
             self.consumed = data.get("consumed", {})
             self.dry_baseline = data.get("dry_baseline", {})
+            self.rebaseline = bool(data.get("rebaseline"))
+            if data.get("source", "cloud") != source:
+                log.warning(
+                    "Connect source changed from %s to %s; every spool starts from a new baseline when it is next seen",
+                    data.get("source", "cloud"), source,
+                )
+                self.consumed, self.dry_baseline, self.rebaseline = {}, {}, True
+                self._save()
         except FileNotFoundError:
             pass
         except ValueError:
             log.error("%s is unreadable; starting from new baselines", path)
+
+    def needs_baseline(self, uuid: str) -> bool:
+        """True for a spool the current source has not reported yet since a change of source."""
+        return self.rebaseline and uuid not in self.consumed and uuid not in self.dry_baseline and uuid not in self._seen
 
     def seen_in_dry_run(self, uuid: str) -> bool:
         return self.dry_run and uuid in self._seen
@@ -443,7 +461,10 @@ class State:
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"consumed": self.consumed, "dry_baseline": self.dry_baseline}, indent=2))
+        data = {"consumed": self.consumed, "dry_baseline": self.dry_baseline, "source": self.source}
+        if self.rebaseline:
+            data["rebaseline"] = True
+        tmp.write_text(json.dumps(data, indent=2))
         os.replace(tmp, self.path)
 
 
@@ -594,6 +615,9 @@ class Bridge:
             )
 
     def _previous_consumed(self, uuid: str, spool: dict) -> float | None:
+        if self.state.needs_baseline(uuid):
+            # The marker in Spoolman was counted by the other source.
+            return None
         if self.state.seen_in_dry_run(uuid):
             return self.state.previous(uuid)
         stored = stored_consumed(spool)
