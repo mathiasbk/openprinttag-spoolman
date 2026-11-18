@@ -99,10 +99,35 @@ def test_a_spool_without_a_tag_is_reported_with_its_own_uuid(respx_mock, tmp_pat
 
 @respx.mock(assert_all_called=False)
 def test_tools_without_a_spool_and_other_printers_are_left_out(respx_mock, tmp_path):
-    mock_local(respx_mock, [tool_row(spool_id=None), tool_row(tool_id="1", device="dev-2")], [])
+    mock_local(respx_mock, [tool_row(spool_id=None, from_nfc=False), tool_row(tool_id="1", device="dev-2")], [])
     printer = LocalConnectClient(local_settings(tmp_path), httpx.Client()).fetch_printer("local", "dev-1")
     assert len(printer["fff"]["tools"]) == 1
     assert parse_loaded_spools(printer) == []
+
+
+@respx.mock(assert_all_called=False)
+def test_a_tagged_spool_not_yet_in_materials_is_added_and_read(respx_mock, tmp_path):
+    mock_local(respx_mock, [tool_row(spool_id=None)], [spool()])
+    add = respx_mock.post(f"{BASE}/printers/dev-1/tools/0/spool").respond(json=spool())
+    [loaded] = parse_loaded_spools(LocalConnectClient(local_settings(tmp_path), httpx.Client()).fetch_printer("local", "dev-1"))
+    assert add.called and add.calls[0].request.headers["Authorization"] == f"Bearer {TOKEN}"
+    assert loaded.uuid == UUID and loaded.is_from_nfc and loaded.consumed_weight == 120.0
+
+
+@respx.mock(assert_all_called=False)
+def test_a_refused_spool_add_leaves_the_tool_empty(respx_mock, tmp_path):
+    mock_local(respx_mock, [tool_row(spool_id=None)], [])
+    respx_mock.post(f"{BASE}/printers/dev-1/tools/0/spool").respond(409, json={"code": "materials/NOT_REPORTED", "title": "No tag"})
+    printer = LocalConnectClient(local_settings(tmp_path), httpx.Client()).fetch_printer("local", "dev-1")
+    assert parse_loaded_spools(printer) == []
+
+
+@respx.mock(assert_all_called=False)
+def test_a_spool_already_in_materials_is_not_added_again(respx_mock, tmp_path):
+    mock_local(respx_mock, [tool_row()], [spool()])
+    add = respx_mock.post(f"{BASE}/printers/dev-1/tools/0/spool").respond(json=spool())
+    LocalConnectClient(local_settings(tmp_path), httpx.Client()).fetch_printer("local", "dev-1")
+    assert not add.called
 
 
 @respx.mock(assert_all_called=False)
@@ -251,3 +276,32 @@ def test_an_unticked_certificate_check_is_saved_as_off(respx_mock, tmp_path):
     admin = signed_in(service)
     admin.post("/setup/connect", data={"source": "local", "local_connect_url": LOCAL, "local_connect_token": TOKEN})
     assert read_config(tmp_path)["local_connect_verify_tls"] is False
+
+
+@respx.mock(assert_all_called=False)
+def test_a_credential_that_may_not_add_warns_once_and_names_the_scope(respx_mock, tmp_path, caplog):
+    mock_local(respx_mock, [tool_row(spool_id=None)], [])
+    add = respx_mock.post(f"{BASE}/printers/dev-1/tools/0/spool").respond(403, json={"code": "core.auth/ACCESS_DENIED"})
+    client = LocalConnectClient(local_settings(tmp_path), httpx.Client())
+    with caplog.at_level("DEBUG", logger="bridge.local_connect"):
+        for _ in range(3):
+            assert parse_loaded_spools(client.fetch_printer("local", "dev-1")) == []
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert add.call_count == 3
+    assert len(warnings) == 1 and "operate scope" in warnings[0].getMessage()
+
+
+@respx.mock(assert_all_called=False)
+def test_a_tool_warns_again_after_an_add_succeeded(respx_mock, tmp_path, caplog):
+    mock_local(respx_mock, [tool_row(spool_id=None)], [spool()])
+    add = respx_mock.post(f"{BASE}/printers/dev-1/tools/0/spool")
+    add.side_effect = [
+        httpx.Response(409, json={"code": "materials/NOT_REPORTED"}),
+        httpx.Response(200, json=spool()),
+        httpx.Response(409, json={"code": "materials/NOT_REPORTED"}),
+    ]
+    client = LocalConnectClient(local_settings(tmp_path), httpx.Client())
+    with caplog.at_level("WARNING", logger="bridge.local_connect"):
+        for _ in range(3):
+            client.fetch_printer("local", "dev-1")
+    assert len([r for r in caplog.records if r.levelname == "WARNING"]) == 2

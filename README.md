@@ -100,13 +100,14 @@ The dashboard shows what Spoolman has left next to Connect's number for each lin
 Prusa publishes a [Prusa Connect server you run yourself](https://github.com/prusa3d/prusa-connect). Its Materials extension keeps your spools, adds the ones a printer reads from an NFC tag, and counts what each tool feeds. The bridge reads it over that server's own REST API, so no browser login is needed.
 
 1. Install the **Materials** extension in the server from the marketplace, and switch it on.
-2. In the server, open **Settings**, **API credentials** and create one with the **read** scope.
+2. In the server, open **Settings**, **API credentials** and create one. The **read** scope is enough to read spools. With the **operate** scope the bridge also adds a spool a printer has just read from its tag to Materials, so you do not have to click **Add to Materials** yourself. Operate also lets the credential start and stop prints, so keep it as private as the server's own login.
 3. In the bridge setup, choose **Self-hosted Connect** on the Prusa Connect step, enter the server's address (for example `http://server:8080`) and paste the credential. **Test connection** lists the printers it found.
 4. Choose the printers as usual.
 
 What changes compared to connect.prusa3d.com:
 
 - **Spools come from Materials:** the Warehouse page lists the spools in Materials, and a spool's consumption is its full weight minus what Materials says is left.
+- **Tagged spools are added to Materials:** Materials names a spool on a tool only after it is in its stock. When a tool reports a tag that Materials does not know yet, the bridge adds it, as **Add to Materials** would. This needs a credential with the operate scope. With only the read scope, the tool shows no spool until you add it in the server.
 - **Spools without a tag work too:** a spool you put on a tool in Materials gets its own ID there, and Materials counts its use from the printer's odometer. Link it to a Spoolman spool once, and the bridge deducts its use like any other. It is never created automatically, because it was not read from a tag.
 - **Same tags, same IDs:** a tagged spool has the tag's UUID in both, so a link made while using connect.prusa3d.com keeps working after you move the printer.
 - **Switching:** a printer reports to one Connect at a time. Switching the bridge between connect.prusa3d.com and your own server forgets the chosen printers, so you choose them again. Each spool also starts counting again from what the new source reports the first time it sees it, because the two count used grams from different starting points. Nothing is deducted for that difference, and what was printed between the last read of the old source and the first read of the new one is not deducted either.
